@@ -8,6 +8,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "event_groups.h"
+#include "semphr.h"
 #include "main.h"
 #include "lcd_task.h"
 #include "timers.h"
@@ -16,6 +17,7 @@ static uint16_t rawDataBuffer[1024]; // 用于缓存ADC的原始数据
 static float waveform[1024]; // 采集到的波形数据
 static TimerHandle_t xHoldOffTimer; // 软件定时器，用于禁止触发
 static TimerHandle_t xForceTriggerTimer; // 软件定时器，用于强制触发
+SemaphoreHandle_t xMutexForWaveform; // 用于保护波形缓冲区的互斥锁（LCD 任务与 ADC 中断共享）
 
 static void HoldOffTimerCallback(TimerHandle_t xTimer); // 禁止触发定时器的回调函数
 static void ForceTriggerTimerCallback(TimerHandle_t xTimer); // 强制触发定时器的回调函数
@@ -33,6 +35,9 @@ void WaveformCapture_Init(void)
 
 	// 创建软件定时器，用于强制触发
 	xForceTriggerTimer = xTimerCreate("Force Trigger", pdMS_TO_TICKS(100), pdTRUE, NULL,ForceTriggerTimerCallback);
+
+	// 创建用于保护波形缓冲区的互斥锁
+	xMutexForWaveform = xSemaphoreCreateMutex();
 
 	// 启动该定时器
 	xTimerStart(xForceTriggerTimer, portMAX_DELAY);
@@ -100,17 +105,24 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
 	if(hadc->Instance == ADC1)
 	{
-		// 1. 对采集到的原始数据进行处理
-		for(int i=0; i<1024; i++)
-		{
-			waveform[i] = (rawDataBuffer[i] / 4095.0f * 3.3f) * 2.0f - 2.5f;
-		}
-
-		// 2. 通知LCD任务重绘波形面板
-		extern EventGroupHandle_t xEventGroupForLCD;
 		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-		xEventGroupSetBitsFromISR(xEventGroupForLCD, WAVEFORM_PANEL_REPAINT_BIT, &xHigherPriorityTaskWoken);
+		// 获取互斥锁：中断上下文中必须使用 FromISR 版本的 API
+		if(xSemaphoreTakeFromISR(xMutexForWaveform, &xHigherPriorityTaskWoken) == pdPASS)
+		{
+			// 1. 对采集到的原始数据进行处理
+			for(int i=0; i<1024; i++)
+			{
+				waveform[i] = (rawDataBuffer[i] / 4095.0f * 3.3f) * 2.0f - 2.5f;
+			}
+
+			// 归还互斥锁
+			xSemaphoreGiveFromISR(xMutexForWaveform, &xHigherPriorityTaskWoken);
+
+			// 2. 通知LCD任务重绘波形面板
+			extern EventGroupHandle_t xEventGroupForLCD;
+			xEventGroupSetBitsFromISR(xEventGroupForLCD, WAVEFORM_PANEL_REPAINT_BIT, &xHigherPriorityTaskWoken);
+		}
 
 		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 	}
