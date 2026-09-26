@@ -1,0 +1,13 @@
+# Eclipse / STM32CubeIDE 工作区元数据
+.metadata/
+.ide.log
+
+# 编辑器与本机专用配置
+.vscode/
+.idea/
+*.bak
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,15 @@
+# 统一使用 LF，避免 Windows / Linux 协作时出现整片假差异
+* text=auto eol=lf
+
+# 二进制文件：不做换行转换，也不参与文本 diff
+*.pdf  binary
+*.a    binary
+*.exe  binary
+*.elf  binary
+*.hex  binary
+*.bin  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.ico  binary
+*.zip  binary
