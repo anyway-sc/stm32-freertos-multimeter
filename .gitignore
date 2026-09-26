@@ -1,0 +1,19 @@
+# STM32CubeIDE / Eclipse 构建产物
+.metadata/
+Debug/
+Release/
+**/Debug/
+**/Release/
+*.launch
+*.o
+*.d
+*.elf
+*.map
+
+# 编辑器与本机专用配置（含绝对路径）
+.vscode/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
