@@ -649,6 +649,39 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+/**
+  * @brief  FreeRTOS 栈溢出钩子（需要 configCHECK_FOR_STACK_OVERFLOW = 2）
+  * @param  xTask       溢出任务的任务句柄
+  * @param  pcTaskName  溢出任务的名称
+  * @note   出错的任务名保存在 g_stackOverflowTaskName 中，
+  *         在线调试时可以直接在 Watch 窗口查看是哪个任务爆栈。
+  */
+volatile char *g_stackOverflowTaskName = NULL;
+
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+  (void)xTask;
+  g_stackOverflowTaskName = pcTaskName;
+
+  taskDISABLE_INTERRUPTS();
+  for (;;)
+  {
+  }
+}
+
+/**
+  * @brief  FreeRTOS 堆分配失败钩子（需要 configUSE_MALLOC_FAILED_HOOK = 1）
+  * @note   触发说明 configTOTAL_HEAP_SIZE 不够用，
+  *         或运行期间反复创建/删除对象造成堆碎片。
+  */
+void vApplicationMallocFailedHook(void)
+{
+  taskDISABLE_INTERRUPTS();
+  for (;;)
+  {
+  }
+}
+
 /* USER CODE END 4 */
 
 /**
