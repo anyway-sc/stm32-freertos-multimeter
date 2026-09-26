@@ -134,6 +134,7 @@ int main(void)
   xTaskCreate(vKeyTask, "Key", 128, NULL, 3, NULL);
   xTaskCreate(vBuzzerTask, "Buzzer", 128, NULL, 1, NULL);
   xTaskCreate(vLCDTask, "LCD", 256, NULL, 1, NULL);
+  xTaskCreate(vWaveformTask, "Waveform", 128, NULL, 2, NULL);
   xTaskCreate(vLEDTask, "LED", 128, NULL, 0, NULL);
   vTaskStartScheduler();
 

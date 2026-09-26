@@ -10,6 +10,7 @@
 #include "event_groups.h"
 #include "semphr.h"
 #include "main.h"
+#include "waveform_capture.h"
 #include "lcd_task.h"
 #include "timers.h"
 
@@ -17,7 +18,8 @@ static uint16_t rawDataBuffer[1024]; // 用于缓存ADC的原始数据
 static float waveform[1024]; // 采集到的波形数据
 static TimerHandle_t xHoldOffTimer; // 软件定时器，用于禁止触发
 static TimerHandle_t xForceTriggerTimer; // 软件定时器，用于强制触发
-SemaphoreHandle_t xMutexForWaveform; // 用于保护波形缓冲区的互斥锁（LCD 任务与 ADC 中断共享）
+SemaphoreHandle_t xMutexForWaveform; // 用于保护波形缓冲区的互斥锁（波形处理任务与 LCD 任务共享）
+static SemaphoreHandle_t xSemaphoreForWaveformReady; // 二进制信号量：ADC采集完成 -> 波形处理任务
 
 static void HoldOffTimerCallback(TimerHandle_t xTimer); // 禁止触发定时器的回调函数
 static void ForceTriggerTimerCallback(TimerHandle_t xTimer); // 强制触发定时器的回调函数
@@ -38,6 +40,9 @@ void WaveformCapture_Init(void)
 
 	// 创建用于保护波形缓冲区的互斥锁
 	xMutexForWaveform = xSemaphoreCreateMutex();
+
+	// 创建"采集完成"信号量，用于把中断里的通知交给波形处理任务
+	xSemaphoreForWaveformReady = xSemaphoreCreateBinary();
 
 	// 启动该定时器
 	xTimerStart(xForceTriggerTimer, portMAX_DELAY);
@@ -107,9 +112,31 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 	{
 		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-		// 获取互斥锁：中断上下文中必须使用 FromISR 版本的 API
-		if(xSemaphoreTakeFromISR(xMutexForWaveform, &xHigherPriorityTaskWoken) == pdPASS)
+		// 中断里只做最少的动作：发出"采集完成"信号量，
+		// 数据的搬运与转换交给波形处理任务，避免在中断中操作互斥锁
+		xSemaphoreGiveFromISR(xSemaphoreForWaveformReady, &xHigherPriorityTaskWoken);
+
+		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+	}
+}
+
+// @作用：波形处理任务
+// @说明：等待ADC采集完成的信号量，然后用互斥锁独占访问波形缓冲区完成数据转换，
+//        最后通知LCD任务重绘波形面板
+void vWaveformTask(void *argument)
+{
+	extern EventGroupHandle_t xEventGroupForLCD;
+
+	(void)argument;
+
+	for(;;)
+	{
+		// 等待ADC采集完成
+		if(xSemaphoreTake(xSemaphoreForWaveformReady, portMAX_DELAY) == pdPASS)
 		{
+			// 获取互斥锁，独占访问波形缓冲区
+			xSemaphoreTake(xMutexForWaveform, portMAX_DELAY);
+
 			// 1. 对采集到的原始数据进行处理
 			for(int i=0; i<1024; i++)
 			{
@@ -117,14 +144,11 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 			}
 
 			// 归还互斥锁
-			xSemaphoreGiveFromISR(xMutexForWaveform, &xHigherPriorityTaskWoken);
+			xSemaphoreGive(xMutexForWaveform);
 
 			// 2. 通知LCD任务重绘波形面板
-			extern EventGroupHandle_t xEventGroupForLCD;
-			xEventGroupSetBitsFromISR(xEventGroupForLCD, WAVEFORM_PANEL_REPAINT_BIT, &xHigherPriorityTaskWoken);
+			xEventGroupSetBits(xEventGroupForLCD, WAVEFORM_PANEL_REPAINT_BIT);
 		}
-
-		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 	}
 }
 
